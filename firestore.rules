@@ -1,0 +1,1212 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // GLOBAL PRIMITIVES
+    // =========================================================================
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isPlatformOwner() {
+      return isVerified() && request.auth.token.email == 'brokengg.exe@gmail.com';
+    }
+
+    function isAdmin() {
+      return isVerified() && (
+        request.auth.token.email == 'brokengg.exe@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidCompositeId(id) {
+      return id is string && id.size() >= 3 && id.size() <= 260 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUsername(u) {
+      return u is string && u.size() >= 3 && u.size() <= 32 && u.matches('^[a-z0-9_\\.]+$');
+    }
+
+    function isNotSuspended() {
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid)/private/account) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)/private/account).data.suspended != true;
+    }
+
+    function isServerMember(serverId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)) &&
+        get(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.banned != true;
+    }
+
+    function isServerStaff(serverId) {
+      return isServerMember(serverId) &&
+        get(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.role in ['owner', 'admin', 'moderator'];
+    }
+
+    function isServerAdminOrOwner(serverId) {
+      return isServerMember(serverId) &&
+        get(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.role in ['owner', 'admin'];
+    }
+
+    function isServerAdminOrOwnerAfter(serverId) {
+      return isSignedIn() &&
+        existsAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)) &&
+        getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.banned != true &&
+        getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.role in ['owner', 'admin'];
+    }
+
+    function isServerOwner(serverId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/servers/$(serverId)) &&
+        get(/databases/$(database)/documents/servers/$(serverId)).data.ownerId == request.auth.uid;
+    }
+
+    function hasServerPerm(serverId, permKey) {
+      return isServerOwner(serverId) || (
+        isServerMember(serverId) && (
+          get(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.role in ['owner', 'admin'] ||
+          ('permissions' in get(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data &&
+           get(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.permissions[permKey] == true)
+        )
+      );
+    }
+
+    function hasServerPermAfter(serverId, permKey) {
+      return isSignedIn() &&
+        existsAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)) &&
+        getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.banned != true && (
+          getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.role in ['owner', 'admin'] ||
+          ('permissions' in getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data &&
+           getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.permissions[permKey] == true)
+        );
+    }
+
+    // =========================================================================
+    // VALIDATION BLUEPRINTS
+    // =========================================================================
+    function isValidUserPublic(data) {
+      return data.keys().hasAll(['uid', 'username', 'displayName', 'onlineStatus', 'profileVisibility', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'uid', 'username', 'displayName', 'bio', 'pronouns', 'location', 'website',
+          'statusMessage', 'onlineStatus', 'avatarUrl', 'avatarPublicId', 'bannerUrl', 'bannerPublicId',
+          'accentColor', 'profileBg', 'profileVisibility', 'badges', 'discordUsername',
+          'discordAvatar', 'lastUsernameChange', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        isValidUsername(data.username) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 64 &&
+        data.onlineStatus in ['online', 'idle', 'dnd', 'offline'] &&
+        data.profileVisibility in ['public', 'friends', 'private'] &&
+        (!('bio' in data) || (data.bio is string && data.bio.size() <= 500)) &&
+        (!('pronouns' in data) || (data.pronouns is string && data.pronouns.size() <= 40)) &&
+        (!('location' in data) || (data.location is string && data.location.size() <= 80)) &&
+        (!('website' in data) || (data.website is string && data.website.size() <= 256)) &&
+        (!('statusMessage' in data) || (data.statusMessage is string && data.statusMessage.size() <= 120)) &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 2048)) &&
+        (!('avatarPublicId' in data) || (data.avatarPublicId is string && data.avatarPublicId.size() <= 256)) &&
+        (!('bannerUrl' in data) || (data.bannerUrl is string && data.bannerUrl.size() <= 2048)) &&
+        (!('bannerPublicId' in data) || (data.bannerPublicId is string && data.bannerPublicId.size() <= 256)) &&
+        (!('accentColor' in data) || (data.accentColor is string && data.accentColor.size() <= 32)) &&
+        (!('profileBg' in data) || (data.profileBg is string && data.profileBg.size() <= 64)) &&
+        (!('badges' in data) || (data.badges is list && data.badges.size() <= 10 && (data.badges.size() == 0 || data.badges[0] is string))) &&
+        (!('discordUsername' in data) || (data.discordUsername is string && data.discordUsername.size() <= 64)) &&
+        (!('discordAvatar' in data) || (data.discordAvatar is string && data.discordAvatar.size() <= 2048)) &&
+        (!('lastUsernameChange' in data) || data.lastUsernameChange is timestamp) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivate(data) {
+      return data.keys().hasAll(['uid', 'email', 'ageVerified', 'afterDarkConsent', 'suspended', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'uid', 'email', 'ageVerified', 'afterDarkConsent', 'dmPermission',
+          'friendRequestPermission', 'discordId', 'suspended', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.ageVerified is bool &&
+        data.afterDarkConsent is bool &&
+        data.suspended is bool &&
+        (!('dmPermission' in data) || data.dmPermission in ['everyone', 'friends', 'server_members']) &&
+        (!('friendRequestPermission' in data) || data.friendRequestPermission in ['everyone', 'mutual_servers', 'none']) &&
+        (!('discordId' in data) || (data.discordId is string && data.discordId.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUsernameClaim(data) {
+      return data.keys().hasAll(['uid', 'username', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'username', 'createdAt']) &&
+        isValidId(data.uid) &&
+        isValidUsername(data.username) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() <= 254 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidFriendRequest(data) {
+      return data.keys().hasAll(['id', 'fromUid', 'toUid', 'participants', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'fromUid', 'toUid', 'fromUsername', 'toUsername', 'participants', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.fromUid) &&
+        isValidId(data.toUid) &&
+        data.fromUid != data.toUid &&
+        (!('fromUsername' in data) || (data.fromUsername is string && data.fromUsername.size() <= 32)) &&
+        (!('toUsername' in data) || (data.toUsername is string && data.toUsername.size() <= 32)) &&
+        data.participants is list && data.participants.size() == 2 &&
+        data.participants[0] is string && data.participants[1] is string &&
+        data.fromUid in data.participants && data.toUid in data.participants &&
+        data.status in ['pending', 'accepted', 'rejected', 'cancelled'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFriendship(data) {
+      return data.keys().hasAll(['id', 'users', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'users', 'createdAt']) &&
+        isValidCompositeId(data.id) &&
+        data.users is list && data.users.size() == 2 &&
+        data.users[0] is string && data.users[1] is string &&
+        data.users[0] != data.users[1] &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidBlockedUser(data) {
+      return data.keys().hasAll(['blockerUid', 'blockedUid', 'createdAt']) &&
+        data.keys().hasOnly(['blockerUid', 'blockedUid', 'reason', 'createdAt']) &&
+        isValidId(data.blockerUid) &&
+        isValidId(data.blockedUid) &&
+        data.blockerUid != data.blockedUid &&
+        (!('reason' in data) || (data.reason is string && data.reason.size() <= 250)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidServerPermissions(p) {
+      return p is map &&
+        p.keys().hasAll(['manageServer', 'manageChannels', 'manageRoles', 'manageMessages', 'moderateMembers', 'createInvites', 'pinMessages', 'sendMessages']) &&
+        p.keys().hasOnly(['manageServer', 'manageChannels', 'manageRoles', 'manageMessages', 'moderateMembers', 'createInvites', 'pinMessages', 'sendMessages']) &&
+        p.manageServer is bool &&
+        p.manageChannels is bool &&
+        p.manageRoles is bool &&
+        p.manageMessages is bool &&
+        p.moderateMembers is bool &&
+        p.createInvites is bool &&
+        p.pinMessages is bool &&
+        p.sendMessages is bool;
+    }
+
+    function isValidServer(data) {
+      return data.keys().hasAll(['id', 'name', 'ownerId', 'isPublic', 'isAfterDark', 'memberCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'description', 'iconUrl', 'iconPublicId', 'bannerUrl', 'bannerPublicId',
+          'accentColor', 'ownerId', 'isPublic', 'isAfterDark', 'category', 'memberCount', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+        (!('iconUrl' in data) || (data.iconUrl is string && data.iconUrl.size() <= 2048)) &&
+        (!('iconPublicId' in data) || (data.iconPublicId is string && data.iconPublicId.size() <= 256)) &&
+        (!('bannerUrl' in data) || (data.bannerUrl is string && data.bannerUrl.size() <= 2048)) &&
+        (!('bannerPublicId' in data) || (data.bannerPublicId is string && data.bannerPublicId.size() <= 256)) &&
+        (!('accentColor' in data) || (data.accentColor is string && data.accentColor.size() <= 32)) &&
+        isValidId(data.ownerId) &&
+        data.isPublic is bool &&
+        data.isAfterDark is bool &&
+        (!('category' in data) || (data.category is string && data.category.size() <= 40)) &&
+        data.memberCount is int && data.memberCount >= 0 && data.memberCount <= 1000000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidServerMember(data) {
+      return data.keys().hasAll(['serverId', 'userId', 'role', 'isPublicServer', 'muted', 'banned', 'joinedAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'serverId', 'userId', 'role', 'roleIds', 'permissions', 'isPublicServer',
+          'muted', 'banned', 'nickname', 'inviteCode', 'serverOwnerId', 'memberUids',
+          'joinedAt', 'updatedAt'
+        ]) &&
+        isValidId(data.serverId) &&
+        isValidId(data.userId) &&
+        data.role in ['owner', 'admin', 'moderator', 'member'] &&
+        (!('roleIds' in data) || (data.roleIds is list && data.roleIds.size() <= 20 && (data.roleIds.size() == 0 || data.roleIds[0] is string))) &&
+        (!('permissions' in data) || isValidServerPermissions(data.permissions)) &&
+        data.isPublicServer is bool &&
+        data.muted is bool &&
+        data.banned is bool &&
+        (!('nickname' in data) || (data.nickname is string && data.nickname.size() <= 64)) &&
+        (!('inviteCode' in data) || (data.inviteCode is string && data.inviteCode.size() <= 32)) &&
+        (!('serverOwnerId' in data) || (data.serverOwnerId is string && data.serverOwnerId.size() <= 128)) &&
+        (!('memberUids' in data) || (data.memberUids is list && data.memberUids.size() <= 50 && (data.memberUids.size() == 0 || data.memberUids[0] is string))) &&
+        data.joinedAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidServerRole(data) {
+      return data.keys().hasAll(['id', 'serverId', 'name', 'color', 'position', 'permissions', 'isPublicServer', 'ownerId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'serverId', 'name', 'color', 'position', 'permissions', 'isPublicServer', 'ownerId', 'memberUids', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.serverId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 40 &&
+        data.color is string && data.color.size() >= 3 && data.color.size() <= 32 &&
+        data.position is int && data.position >= 0 && data.position <= 500 &&
+        isValidServerPermissions(data.permissions) &&
+        data.isPublicServer is bool &&
+        isValidId(data.ownerId) &&
+        (!('memberUids' in data) || (data.memberUids is list && data.memberUids.size() <= 50 && (data.memberUids.size() == 0 || data.memberUids[0] is string))) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidServerInvitation(data) {
+      return data.keys().hasAll(['code', 'serverId', 'creatorId', 'maxUses', 'uses', 'revoked', 'createdAt']) &&
+        data.keys().hasOnly(['code', 'serverId', 'creatorId', 'serverOwnerId', 'staffUids', 'maxUses', 'uses', 'revoked', 'createdAt']) &&
+        data.code is string && data.code.size() >= 4 && data.code.size() <= 32 && data.code.matches('^[a-zA-Z0-9_\\-]+$') &&
+        isValidId(data.serverId) &&
+        isValidId(data.creatorId) &&
+        (!('serverOwnerId' in data) || (data.serverOwnerId is string && data.serverOwnerId.size() <= 128)) &&
+        (!('staffUids' in data) || (data.staffUids is list && data.staffUids.size() <= 20 && (data.staffUids.size() == 0 || data.staffUids[0] is string))) &&
+        data.maxUses is int && data.maxUses >= 0 && data.maxUses <= 10000 &&
+        data.uses is int && data.uses >= 0 && data.uses <= 10000 &&
+        data.revoked is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidChannelCategory(data) {
+      return data.keys().hasAll(['id', 'serverId', 'name', 'position', 'isPublicServer', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'serverId', 'name', 'position', 'isPublicServer', 'ownerId', 'memberUids', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.serverId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+        data.position is int && data.position >= 0 && data.position <= 500 &&
+        data.isPublicServer is bool &&
+        (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128)) &&
+        (!('memberUids' in data) || (data.memberUids is list && data.memberUids.size() <= 50 && (data.memberUids.size() == 0 || data.memberUids[0] is string))) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidChannel(data) {
+      return data.keys().hasAll(['id', 'serverId', 'name', 'type', 'isPrivate', 'isPublic', 'isAfterDark', 'position', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'serverId', 'categoryId', 'name', 'type', 'topic', 'description', 'isPrivate', 'isPublic', 'isAfterDark', 'position', 'ownerId', 'memberUids', 'allowedRoles', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.serverId) &&
+        (!('categoryId' in data) || (data.categoryId is string && data.categoryId.size() <= 128)) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 64 &&
+        data.type in ['text', 'announcement', 'voice', 'private'] &&
+        (!('topic' in data) || (data.topic is string && data.topic.size() <= 300)) &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+        data.isPrivate is bool &&
+        data.isPublic is bool &&
+        data.isAfterDark is bool &&
+        data.position is int && data.position >= 0 && data.position <= 500 &&
+        (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128)) &&
+        (!('memberUids' in data) || (data.memberUids is list && data.memberUids.size() <= 50 && (data.memberUids.size() == 0 || data.memberUids[0] is string))) &&
+        (!('allowedRoles' in data) || (data.allowedRoles is list && data.allowedRoles.size() <= 25 && (data.allowedRoles.size() == 0 || data.allowedRoles[0] is string))) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'scopeType', 'scopeId', 'isPublicChannel', 'authorId', 'authorName', 'content', 'pinned', 'edited', 'deleted', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'scopeType', 'scopeId', 'serverId', 'isPublicChannel', 'participantIds',
+          'allowedUids', 'authorId', 'senderId', 'authorName', 'authorAvatar', 'content', 'text',
+          'attachments', 'attachmentMeta', 'replyToId', 'replyPreview', 'mentions',
+          'pinned', 'edited', 'editedAt', 'deleted', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.scopeType in ['channel', 'dm'] &&
+        isValidId(data.scopeId) &&
+        (!('serverId' in data) || (data.serverId is string && data.serverId.size() <= 128)) &&
+        data.isPublicChannel is bool &&
+        (!('participantIds' in data) || (data.participantIds is list && data.participantIds.size() <= 20 && (data.participantIds.size() == 0 || data.participantIds[0] is string))) &&
+        (!('allowedUids' in data) || (data.allowedUids is list && data.allowedUids.size() <= 50 && (data.allowedUids.size() == 0 || data.allowedUids[0] is string))) &&
+        isValidId(data.authorId) &&
+        (!('senderId' in data) || (isValidId(data.senderId) && data.senderId == data.authorId)) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 64 &&
+        (!('authorAvatar' in data) || (data.authorAvatar is string && data.authorAvatar.size() <= 2048)) &&
+        data.content is string && data.content.size() <= 4000 &&
+        (!('text' in data) || (data.text is string && data.text.size() <= 4000)) &&
+        (!('attachments' in data) || (data.attachments is list && data.attachments.size() <= 5 && (data.attachments.size() == 0 || data.attachments[0] is string))) &&
+        (!('attachmentMeta' in data) || (data.attachmentMeta is list && data.attachmentMeta.size() <= 5 && (data.attachmentMeta.size() == 0 || data.attachmentMeta[0] is map))) &&
+        (!('replyToId' in data) || (data.replyToId is string && data.replyToId.size() <= 128)) &&
+        (!('replyPreview' in data) || (data.replyPreview is string && data.replyPreview.size() <= 200)) &&
+        (!('mentions' in data) || (data.mentions is list && data.mentions.size() <= 10 && (data.mentions.size() == 0 || data.mentions[0] is string))) &&
+        data.pinned is bool &&
+        data.edited is bool &&
+        (!('editedAt' in data) || data.editedAt is timestamp) &&
+        data.deleted is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidConversation(data) {
+      return data.keys().hasAll(['id', 'isGroup', 'ownerId', 'participantIds', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'isGroup', 'name', 'iconUrl', 'ownerId', 'participantIds', 'lastMessageText', 'lastMessageAt', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.isGroup is bool &&
+        (!('name' in data) || (data.name is string && data.name.size() <= 80)) &&
+        (!('iconUrl' in data) || (data.iconUrl is string && data.iconUrl.size() <= 2048)) &&
+        isValidId(data.ownerId) &&
+        data.participantIds is list && data.participantIds.size() >= 2 && data.participantIds.size() <= 20 &&
+        data.participantIds[0] is string && data.participantIds[1] is string &&
+        (data.isGroup == true || (data.participantIds.size() == 2 && data.participantIds[0] != data.participantIds[1])) &&
+        (!('lastMessageText' in data) || (data.lastMessageText is string && data.lastMessageText.size() <= 200)) &&
+        (!('lastMessageAt' in data) || data.lastMessageAt is timestamp) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidConversationMember(data) {
+      return data.keys().hasAll(['conversationId', 'userId', 'unreadCount', 'joinedAt']) &&
+        data.keys().hasOnly(['conversationId', 'userId', 'lastReadAt', 'unreadCount', 'joinedAt']) &&
+        isValidId(data.conversationId) &&
+        isValidId(data.userId) &&
+        (!('lastReadAt' in data) || data.lastReadAt is timestamp) &&
+        data.unreadCount is int && data.unreadCount >= 0 && data.unreadCount <= 10000 &&
+        data.joinedAt is timestamp;
+    }
+
+    function isValidMessageReaction(data) {
+      return data.keys().hasAll(['id', 'messageId', 'scopeId', 'isPublicScope', 'userId', 'emoji', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'messageId', 'scopeId', 'isPublicScope', 'userId', 'emoji', 'createdAt']) &&
+        isValidCompositeId(data.id) &&
+        isValidId(data.messageId) &&
+        isValidId(data.scopeId) &&
+        data.isPublicScope is bool &&
+        isValidId(data.userId) &&
+        data.emoji is string && data.emoji.size() >= 1 && data.emoji.size() <= 16 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPinnedMessage(data) {
+      return data.keys().hasAll(['id', 'scopeId', 'messageId', 'isPublicScope', 'pinnedBy', 'contentPreview', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'scopeId', 'messageId', 'serverId', 'isPublicScope', 'pinnedBy', 'contentPreview', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.scopeId) &&
+        isValidId(data.messageId) &&
+        (!('serverId' in data) || (data.serverId is string && data.serverId.size() <= 128)) &&
+        data.isPublicScope is bool &&
+        isValidId(data.pinnedBy) &&
+        data.contentPreview is string && data.contentPreview.size() <= 400 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'userId', 'type', 'title', 'body', 'read', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'actorId', 'type', 'title', 'body', 'link', 'read', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        (!('actorId' in data) || (data.actorId is string && data.actorId.size() <= 128)) &&
+        data.type in ['friend_request', 'dm', 'group_message', 'server_invite', 'mention', 'reaction', 'moderation'] &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.body is string && data.body.size() <= 300 &&
+        (!('link' in data) || (data.link is string && data.link.size() <= 256)) &&
+        data.read is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidUserSettings(data) {
+      return data.keys().hasAll(['userId', 'theme', 'accentColor', 'fontSize', 'density', 'reducedMotion', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'userId', 'theme', 'accentColor', 'fontSize', 'density', 'reducedMotion',
+          'highContrast', 'notifyDms', 'notifyMentions', 'notifyFriendRequests',
+          'notifyServers', 'showOnlineStatus', 'mediaAutoPreview', 'updatedAt'
+        ]) &&
+        isValidId(data.userId) &&
+        data.theme in ['dark', 'light'] &&
+        data.accentColor is string && data.accentColor.size() <= 32 &&
+        data.fontSize in ['sm', 'md', 'lg'] &&
+        data.density in ['compact', 'comfortable'] &&
+        data.reducedMotion is bool &&
+        (!('highContrast' in data) || data.highContrast is bool) &&
+        (!('notifyDms' in data) || data.notifyDms is bool) &&
+        (!('notifyMentions' in data) || data.notifyMentions is bool) &&
+        (!('notifyFriendRequests' in data) || data.notifyFriendRequests is bool) &&
+        (!('notifyServers' in data) || data.notifyServers is bool) &&
+        (!('showOnlineStatus' in data) || data.showOnlineStatus is bool) &&
+        (!('mediaAutoPreview' in data) || data.mediaAutoPreview is bool) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['id', 'reporterId', 'targetType', 'targetId', 'reason', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'reporterId', 'targetType', 'targetId', 'serverId', 'reason', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.reporterId) &&
+        data.targetType in ['user', 'message', 'server', 'media'] &&
+        data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+        (!('serverId' in data) || (data.serverId is string && data.serverId.size() <= 128)) &&
+        data.reason is string && data.reason.size() >= 3 && data.reason.size() <= 500 &&
+        data.status in ['open', 'reviewing', 'resolved', 'dismissed'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidModerationAction(data) {
+      return data.keys().hasAll(['id', 'actorId', 'targetUserId', 'action', 'reason', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'serverId', 'actorId', 'targetUserId', 'action', 'reason', 'createdAt']) &&
+        isValidId(data.id) &&
+        (!('serverId' in data) || (data.serverId is string && data.serverId.size() <= 128)) &&
+        isValidId(data.actorId) &&
+        isValidId(data.targetUserId) &&
+        data.action in ['mute', 'unmute', 'kick', 'ban', 'unban', 'delete_message', 'suspend', 'unsuspend'] &&
+        data.reason is string && data.reason.size() <= 500 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidVoiceSession(data) {
+      return data.keys().hasAll(['id', 'channelId', 'serverId', 'userId', 'muted', 'deafened', 'speaking', 'joinedAt']) &&
+        data.keys().hasOnly(['id', 'channelId', 'serverId', 'userId', 'displayName', 'muted', 'deafened', 'speaking', 'joinedAt']) &&
+        isValidCompositeId(data.id) &&
+        isValidId(data.channelId) &&
+        isValidId(data.serverId) &&
+        isValidId(data.userId) &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 64)) &&
+        data.muted is bool &&
+        data.deafened is bool &&
+        data.speaking is bool &&
+        data.joinedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'actorId', 'event', 'details', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'serverId', 'serverOwnerId', 'staffUids', 'actorId', 'event', 'details', 'createdAt']) &&
+        isValidId(data.id) &&
+        (!('serverId' in data) || (data.serverId is string && data.serverId.size() <= 128)) &&
+        (!('serverOwnerId' in data) || (data.serverOwnerId is string && data.serverOwnerId.size() <= 128)) &&
+        (!('staffUids' in data) || (data.staffUids is list && data.staffUids.size() <= 20 && (data.staffUids.size() == 0 || data.staffUids[0] is string))) &&
+        isValidId(data.actorId) &&
+        data.event is string && data.event.size() >= 1 && data.event.size() <= 80 &&
+        data.details is string && data.details.size() <= 500 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidMediaItem(data) {
+      return data.keys().hasAll(['id', 'uploaderId', 'title', 'url', 'category', 'visibility', 'isAfterDark', 'mimeType', 'sizeBytes', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'uploaderId', 'title', 'url', 'cloudinaryPublicId', 'cloudinaryAssetId',
+          'category', 'visibility', 'isAfterDark', 'mimeType', 'sizeBytes',
+          'width', 'height', 'format', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.uploaderId) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 80 &&
+        data.url is string && data.url.size() <= 2048 &&
+        (!('cloudinaryPublicId' in data) || (data.cloudinaryPublicId is string && data.cloudinaryPublicId.size() <= 256)) &&
+        (!('cloudinaryAssetId' in data) || (data.cloudinaryAssetId is string && data.cloudinaryAssetId.size() <= 128)) &&
+        data.category in ['general', 'anime', 'reactions', 'funny', 'flirty', 'community'] &&
+        data.visibility in ['public', 'private'] &&
+        data.isAfterDark is bool &&
+        data.mimeType is string && data.mimeType.size() <= 64 &&
+        data.sizeBytes is int && data.sizeBytes >= 0 && data.sizeBytes <= 10485760 &&
+        (!('width' in data) || (data.width is int && data.width >= 1 && data.width <= 20000)) &&
+        (!('height' in data) || (data.height is int && data.height >= 1 && data.height <= 20000)) &&
+        (!('format' in data) || (data.format is string && data.format.size() <= 32)) &&
+        data.createdAt is timestamp &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    // =========================================================================
+    // COLLECTION RULES
+    // =========================================================================
+
+    // 1. Public Users (Non-PII)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (
+        isOwner(userId) || isAdmin() || existing().profileVisibility != 'private'
+      );
+      allow list: if isSignedIn() && (existing().profileVisibility != 'private' || existing().uid == request.auth.uid || isPlatformOwner());
+      allow create: if isVerified() && isValidId(userId) && isOwner(userId) &&
+        isValidUserPublic(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerified() && isValidId(userId) && isValidUserPublic(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'username', 'displayName', 'bio', 'pronouns', 'location', 'website',
+            'statusMessage', 'onlineStatus', 'avatarUrl', 'avatarPublicId', 'bannerUrl', 'bannerPublicId',
+            'accentColor', 'profileBg', 'profileVisibility', 'badges', 'discordUsername', 'discordAvatar',
+            'lastUsernameChange', 'updatedAt'
+          ]))
+        );
+      allow delete: if isVerified() && isValidId(userId) && (isOwner(userId) || isAdmin());
+
+      // 2. Private User PII Split Collection
+      match /private/{docId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
+        allow list: if false;
+        allow create: if isVerified() && isValidId(userId) && docId == 'account' && isOwner(userId) &&
+          isValidUserPrivate(incoming()) &&
+          incoming().uid == request.auth.uid &&
+          incoming().suspended == false &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time;
+        allow update: if isVerified() && isValidId(userId) && docId == 'account' &&
+          isValidUserPrivate(incoming()) &&
+          incoming().uid == existing().uid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isAdmin() ||
+            (isOwner(userId) && incoming().suspended == existing().suspended &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'email', 'ageVerified', 'afterDarkConsent', 'dmPermission',
+                'friendRequestPermission', 'discordId', 'updatedAt'
+              ]))
+          );
+        allow delete: if isVerified() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      }
+    }
+
+    // 3. Usernames Uniqueness Registry (single-doc existence lookup allowed for signup; list strictly blocked)
+    match /usernames/{username} {
+      allow get: if isValidUsername(username);
+      allow list: if false;
+      allow create: if isVerified() && isValidUsername(username) &&
+        isValidUsernameClaim(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        incoming().username == username &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isVerified() && isValidUsername(username) &&
+        (existing().uid == request.auth.uid || isAdmin());
+    }
+
+    // 4. Admins
+    match /admins/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create, update: if isAdmin() && isValidId(userId) && isValidAdminRecord(incoming());
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // 5. Friend Requests
+    match /friendRequests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && request.auth.uid in existing().participants;
+      allow list: if isSignedIn() && request.auth.uid in existing().participants;
+      allow create: if isVerified() && isNotSuspended() && isValidId(requestId) &&
+        isValidFriendRequest(incoming()) &&
+        incoming().id == requestId &&
+        incoming().fromUid == request.auth.uid &&
+        incoming().status == 'pending' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(incoming().toUid));
+      allow update: if isVerified() && isNotSuspended() && isValidId(requestId) &&
+        isValidFriendRequest(incoming()) &&
+        existing().status == 'pending' &&
+        incoming().id == existing().id &&
+        incoming().fromUid == existing().fromUid &&
+        incoming().toUid == existing().toUid &&
+        incoming().participants == existing().participants &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) && (
+          (request.auth.uid == existing().toUid && incoming().status in ['accepted', 'rejected']) ||
+          (request.auth.uid == existing().fromUid && incoming().status == 'cancelled')
+        );
+      allow delete: if isVerified() && isValidId(requestId) &&
+        (request.auth.uid in existing().participants || isAdmin());
+    }
+
+    // 6. Friendships
+    match /friendships/{friendshipId} {
+      allow get: if isSignedIn() && isValidCompositeId(friendshipId) && request.auth.uid in existing().users;
+      allow list: if isSignedIn() && request.auth.uid in existing().users;
+      allow create: if isVerified() && isNotSuspended() && isValidCompositeId(friendshipId) &&
+        isValidFriendship(incoming()) &&
+        incoming().id == friendshipId &&
+        request.auth.uid in incoming().users &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isVerified() && isValidCompositeId(friendshipId) &&
+        (request.auth.uid in existing().users || isAdmin());
+    }
+
+    // 7. Blocked Users
+    match /blockedUsers/{blockId} {
+      allow get: if isSignedIn() && isValidCompositeId(blockId) && existing().blockerUid == request.auth.uid;
+      allow list: if isSignedIn() && existing().blockerUid == request.auth.uid;
+      allow create: if isVerified() && isValidCompositeId(blockId) &&
+        isValidBlockedUser(incoming()) &&
+        incoming().blockerUid == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isVerified() && isValidCompositeId(blockId) &&
+        (existing().blockerUid == request.auth.uid || isAdmin());
+    }
+
+    // 8. Servers
+    match /servers/{serverId} {
+      allow get: if isSignedIn() && isValidId(serverId) && (
+        existing().isPublic == true || existing().ownerId == request.auth.uid || isServerMember(serverId) || isAdmin()
+      );
+      allow list: if isSignedIn() && (existing().isPublic == true || existing().ownerId == request.auth.uid || isPlatformOwner());
+      allow create: if isVerified() && isNotSuspended() && isValidId(serverId) &&
+        isValidServer(incoming()) &&
+        incoming().id == serverId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().memberCount == 1 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerified() && isNotSuspended() && isValidId(serverId) &&
+        isValidServer(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isServerOwner(serverId) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'description', 'iconUrl', 'iconPublicId', 'bannerUrl', 'bannerPublicId',
+            'accentColor', 'isPublic', 'isAfterDark', 'category', 'ownerId', 'memberCount', 'updatedAt'
+          ])) ||
+          (hasServerPerm(serverId, 'manageServer') && incoming().ownerId == existing().ownerId &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'description', 'iconUrl', 'iconPublicId', 'bannerUrl', 'bannerPublicId',
+              'accentColor', 'isPublic', 'isAfterDark', 'category', 'memberCount', 'updatedAt'
+            ])) ||
+          (incoming().ownerId == existing().ownerId &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt']) &&
+            (hasServerPerm(serverId, 'manageServer') || (
+              incoming().memberCount == existing().memberCount + 1 &&
+              existsAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)) && (
+                existing().isPublic == true ||
+                ('inviteCode' in getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data &&
+                 exists(/databases/$(database)/documents/serverInvitations/$(getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.inviteCode)) &&
+                 get(/databases/$(database)/documents/serverInvitations/$(getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.inviteCode)).data.serverId == serverId &&
+                 get(/databases/$(database)/documents/serverInvitations/$(getAfter(/databases/$(database)/documents/serverMembers/$(serverId + '_' + request.auth.uid)).data.inviteCode)).data.revoked == false)
+              )
+            )))
+        );
+      allow delete: if isVerified() && isValidId(serverId) && (isServerOwner(serverId) || isAdmin());
+    }
+
+    // 9. Server Members
+    match /serverMembers/{memberId} {
+      allow get: if isSignedIn() && isValidCompositeId(memberId) && (
+        existing().userId == request.auth.uid || existing().isPublicServer == true || isServerMember(existing().serverId) || isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        existing().userId == request.auth.uid ||
+        existing().isPublicServer == true ||
+        ('serverOwnerId' in existing() && existing().serverOwnerId == request.auth.uid) ||
+        ('memberUids' in existing() && request.auth.uid in existing().memberUids) ||
+        isPlatformOwner()
+      );
+      allow create: if isVerified() && isNotSuspended() && isValidCompositeId(memberId) &&
+        isValidServerMember(incoming()) &&
+        memberId == incoming().serverId + '_' + incoming().userId &&
+        incoming().userId == request.auth.uid &&
+        incoming().banned == false &&
+        incoming().muted == false &&
+        incoming().joinedAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/servers/$(incoming().serverId)) && (
+          (incoming().role == 'owner' && getAfter(/databases/$(database)/documents/servers/$(incoming().serverId)).data.ownerId == request.auth.uid) ||
+          (incoming().role == 'member' && !('permissions' in incoming()) && !('roleIds' in incoming()) && getAfter(/databases/$(database)/documents/servers/$(incoming().serverId)).data.isPublic == true) ||
+          (incoming().role == 'member' && !('permissions' in incoming()) && !('roleIds' in incoming()) && 'inviteCode' in incoming() &&
+            exists(/databases/$(database)/documents/serverInvitations/$(incoming().inviteCode)) &&
+            get(/databases/$(database)/documents/serverInvitations/$(incoming().inviteCode)).data.serverId == incoming().serverId &&
+            get(/databases/$(database)/documents/serverInvitations/$(incoming().inviteCode)).data.revoked == false)
+        );
+      allow update: if isVerified() && isNotSuspended() && isValidCompositeId(memberId) &&
+        isValidServerMember(incoming()) &&
+        incoming().serverId == existing().serverId &&
+        incoming().userId == existing().userId &&
+        incoming().joinedAt == existing().joinedAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isServerOwner(existing().serverId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'role', 'roleIds', 'permissions', 'muted', 'banned', 'nickname', 'isPublicServer', 'serverOwnerId', 'memberUids', 'updatedAt'
+            ])) ||
+          (hasServerPerm(existing().serverId, 'manageRoles') &&
+            existing().userId != request.auth.uid &&
+            existing().role != 'owner' &&
+            incoming().role != 'owner' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'role', 'roleIds', 'permissions', 'muted', 'banned', 'nickname', 'isPublicServer', 'serverOwnerId', 'memberUids', 'updatedAt'
+            ])) ||
+          (hasServerPerm(existing().serverId, 'manageServer') &&
+            incoming().role == existing().role &&
+            !incoming().diff(existing()).affectedKeys().hasAny(['roleIds', 'permissions']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['isPublicServer', 'serverOwnerId', 'memberUids', 'updatedAt'])) ||
+          ((isServerStaff(existing().serverId) || hasServerPerm(existing().serverId, 'moderateMembers')) &&
+            existing().userId != request.auth.uid &&
+            existing().role != 'owner' &&
+            incoming().role == existing().role &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['muted', 'banned', 'updatedAt'])) ||
+          (existing().userId == request.auth.uid &&
+            incoming().role == existing().role &&
+            incoming().muted == existing().muted &&
+            incoming().banned == existing().banned &&
+            !incoming().diff(existing()).affectedKeys().hasAny(['role', 'roleIds', 'permissions', 'muted', 'banned']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['nickname', 'updatedAt']))
+        );
+      allow delete: if isVerified() && isValidCompositeId(memberId) && (
+        existing().userId == request.auth.uid ||
+        (existing().role != 'owner' && (isServerAdminOrOwner(existing().serverId) || hasServerPerm(existing().serverId, 'moderateMembers'))) ||
+        isAdmin()
+      );
+    }
+
+    // 9b. Server Roles (Custom Roles & Granular Permissions)
+    match /serverRoles/{roleId} {
+      allow get: if isSignedIn() && isValidId(roleId) && (
+        existing().isPublicServer == true ||
+        existing().ownerId == request.auth.uid ||
+        isServerMember(existing().serverId) ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        existing().isPublicServer == true ||
+        existing().ownerId == request.auth.uid ||
+        ('memberUids' in existing() && request.auth.uid in existing().memberUids) ||
+        isPlatformOwner()
+      );
+      allow create: if isVerified() && isNotSuspended() && isValidId(roleId) &&
+        isValidServerRole(incoming()) &&
+        incoming().id == roleId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        hasServerPermAfter(incoming().serverId, 'manageRoles');
+      allow update: if isVerified() && isNotSuspended() && isValidId(roleId) &&
+        isValidServerRole(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().serverId == existing().serverId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (hasServerPerm(existing().serverId, 'manageRoles') &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'color', 'position', 'permissions', 'isPublicServer', 'ownerId', 'memberUids', 'updatedAt'
+            ])) ||
+          (hasServerPerm(existing().serverId, 'manageServer') &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'isPublicServer', 'memberUids', 'updatedAt'
+            ]))
+        );
+      allow delete: if isVerified() && isValidId(roleId) && (
+        hasServerPerm(existing().serverId, 'manageRoles') || isAdmin()
+      );
+    }
+
+    // 10. Server Invitations
+    match /serverInvitations/{inviteCode} {
+      allow get: if isSignedIn() && inviteCode.size() >= 4 && inviteCode.size() <= 32;
+      allow list: if isSignedIn() && (
+        existing().creatorId == request.auth.uid ||
+        ('serverOwnerId' in existing() && existing().serverOwnerId == request.auth.uid) ||
+        ('staffUids' in existing() && request.auth.uid in existing().staffUids) ||
+        isPlatformOwner()
+      );
+      allow create: if isVerified() && isNotSuspended() &&
+        isValidServerInvitation(incoming()) &&
+        incoming().code == inviteCode &&
+        incoming().creatorId == request.auth.uid &&
+        incoming().uses == 0 &&
+        incoming().revoked == false &&
+        incoming().createdAt == request.time &&
+        (isServerMember(incoming().serverId) && (isServerStaff(incoming().serverId) || hasServerPerm(incoming().serverId, 'createInvites') || get(/databases/$(database)/documents/servers/$(incoming().serverId)).data.isPublic == true));
+      allow update: if isVerified() && isNotSuspended() &&
+        isValidServerInvitation(incoming()) &&
+        incoming().code == existing().code &&
+        incoming().serverId == existing().serverId &&
+        incoming().creatorId == existing().creatorId &&
+        incoming().createdAt == existing().createdAt && (
+          ((isServerStaff(existing().serverId) || hasServerPerm(existing().serverId, 'createInvites')) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['revoked', 'staffUids'])) ||
+          (existing().revoked == false && incoming().uses == existing().uses + 1 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['uses']))
+        );
+      allow delete: if isVerified() && (
+        existing().creatorId == request.auth.uid ||
+        hasServerPerm(existing().serverId, 'createInvites') ||
+        isServerAdminOrOwner(existing().serverId) ||
+        isAdmin()
+      );
+    }
+
+    // 11. Channel Categories
+    match /channelCategories/{categoryId} {
+      allow get: if isSignedIn() && isValidId(categoryId) && (existing().isPublicServer == true || isServerMember(existing().serverId));
+      allow list: if isSignedIn() && (
+        existing().isPublicServer == true ||
+        ('ownerId' in existing() && existing().ownerId == request.auth.uid) ||
+        ('memberUids' in existing() && request.auth.uid in existing().memberUids)
+      );
+      allow create: if isVerified() && isNotSuspended() && isValidId(categoryId) &&
+        isValidChannelCategory(incoming()) &&
+        incoming().id == categoryId &&
+        incoming().createdAt == request.time &&
+        hasServerPermAfter(incoming().serverId, 'manageChannels');
+      allow update: if isVerified() && isValidId(categoryId) &&
+        isValidChannelCategory(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().serverId == existing().serverId &&
+        incoming().createdAt == existing().createdAt &&
+        ((hasServerPerm(existing().serverId, 'manageChannels') &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'position', 'isPublicServer', 'memberUids'])) ||
+         (hasServerPerm(existing().serverId, 'manageServer') &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['isPublicServer', 'memberUids'])));
+      allow delete: if isVerified() && isValidId(categoryId) && (hasServerPerm(existing().serverId, 'manageChannels') || isAdmin());
+    }
+
+    // 12. Channels
+    match /channels/{channelId} {
+      allow get: if isSignedIn() && isValidId(channelId) && (existing().isPublic == true || isServerMember(existing().serverId) || isAdmin());
+      allow list: if isSignedIn() && (
+        existing().isPublic == true ||
+        ('ownerId' in existing() && existing().ownerId == request.auth.uid) ||
+        ('memberUids' in existing() && request.auth.uid in existing().memberUids)
+      );
+      allow create: if isVerified() && isNotSuspended() && isValidId(channelId) &&
+        isValidChannel(incoming()) &&
+        incoming().id == channelId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        hasServerPermAfter(incoming().serverId, 'manageChannels');
+      allow update: if isVerified() && isValidId(channelId) &&
+        isValidChannel(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().serverId == existing().serverId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (hasServerPerm(existing().serverId, 'manageChannels') &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'categoryId', 'type', 'topic', 'description', 'isPrivate', 'isPublic', 'isAfterDark', 'position', 'memberUids', 'allowedRoles', 'updatedAt'
+            ])) ||
+          (hasServerPerm(existing().serverId, 'manageServer') &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'isPublic', 'isPrivate', 'isAfterDark', 'memberUids', 'updatedAt'
+            ])) ||
+          (existing().type != 'private' &&
+            isServerMember(existing().serverId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
+            'memberUids' in incoming() &&
+            incoming().memberUids.size() <= 50 &&
+            request.auth.uid in incoming().memberUids)
+        );
+      allow delete: if isVerified() && isValidId(channelId) && (hasServerPerm(existing().serverId, 'manageChannels') || isAdmin());
+    }
+
+    // 13. Messages
+    match /messages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId) && (
+        existing().authorId == request.auth.uid ||
+        existing().isPublicChannel == true ||
+        (existing().scopeType == 'dm' && 'participantIds' in existing() && request.auth.uid in existing().participantIds) ||
+        (existing().scopeType == 'channel' && 'serverId' in existing() && isServerMember(existing().serverId)) ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        (existing().scopeType == 'dm' && 'participantIds' in existing() && request.auth.uid in existing().participantIds) ||
+        (existing().scopeType == 'channel' && existing().isPublicChannel == true) ||
+        ('allowedUids' in existing() && request.auth.uid in existing().allowedUids)
+      );
+      allow create: if isVerified() && isNotSuspended() && isValidId(messageId) &&
+        isValidMessage(incoming()) &&
+        incoming().id == messageId &&
+        incoming().authorId == request.auth.uid &&
+        (!('senderId' in incoming()) || incoming().senderId == request.auth.uid) &&
+        incoming().deleted == false &&
+        incoming().edited == false &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          (incoming().scopeType == 'dm' && 'participantIds' in incoming() &&
+            request.auth.uid in incoming().participantIds &&
+            exists(/databases/$(database)/documents/conversations/$(incoming().scopeId)) &&
+            request.auth.uid in get(/databases/$(database)/documents/conversations/$(incoming().scopeId)).data.participantIds &&
+            incoming().participantIds == get(/databases/$(database)/documents/conversations/$(incoming().scopeId)).data.participantIds) ||
+          (incoming().scopeType == 'channel' && 'serverId' in incoming() && isServerMember(incoming().serverId) &&
+            get(/databases/$(database)/documents/serverMembers/$(incoming().serverId + '_' + request.auth.uid)).data.muted != true &&
+            (!('permissions' in get(/databases/$(database)/documents/serverMembers/$(incoming().serverId + '_' + request.auth.uid)).data) ||
+             get(/databases/$(database)/documents/serverMembers/$(incoming().serverId + '_' + request.auth.uid)).data.permissions.sendMessages != false))
+        );
+      allow update: if isVerified() && isNotSuspended() && isValidId(messageId) &&
+        isValidMessage(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().scopeType == existing().scopeType &&
+        incoming().scopeId == existing().scopeId &&
+        incoming().isPublicChannel == existing().isPublicChannel &&
+        incoming().authorId == existing().authorId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (existing().authorId == request.auth.uid &&
+            (existing().deleted == false || incoming().deleted == true) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['content', 'text', 'edited', 'editedAt', 'deleted', 'pinned', 'updatedAt']) &&
+            (!('editedAt' in incoming()) || !incoming().diff(existing()).affectedKeys().hasAny(['editedAt']) || incoming().editedAt == request.time)) ||
+          (existing().scopeType == 'dm' && 'participantIds' in existing() &&
+            request.auth.uid in existing().participantIds &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['pinned', 'updatedAt'])) ||
+          (existing().scopeType == 'channel' && 'serverId' in existing() &&
+            (isServerStaff(existing().serverId) || hasServerPerm(existing().serverId, 'manageMessages')) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['text', 'content', 'pinned', 'deleted', 'updatedAt']) &&
+            (!incoming().diff(existing()).affectedKeys().hasAny(['text', 'content']) || incoming().deleted == true)) ||
+          (existing().scopeType == 'channel' && 'serverId' in existing() &&
+            hasServerPerm(existing().serverId, 'pinMessages') &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['pinned', 'updatedAt']))
+        );
+      allow delete: if isVerified() && isValidId(messageId) && (
+        existing().authorId == request.auth.uid ||
+        (existing().scopeType == 'channel' && 'serverId' in existing() && (isServerStaff(existing().serverId) || hasServerPerm(existing().serverId, 'manageMessages'))) ||
+        isAdmin()
+      );
+    }
+
+    // 14. Direct Message Conversations
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && isValidId(conversationId) && (request.auth.uid in existing().participantIds || isAdmin());
+      allow list: if isSignedIn() && request.auth.uid in existing().participantIds;
+      allow create: if isVerified() && isNotSuspended() && isValidId(conversationId) &&
+        isValidConversation(incoming()) &&
+        incoming().id == conversationId &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().participantIds &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerified() && isNotSuspended() && isValidId(conversationId) &&
+        isValidConversation(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        request.auth.uid in existing().participantIds && (
+          (incoming().diff(existing()).affectedKeys().hasOnly(['lastMessageText', 'lastMessageAt', 'updatedAt'])) ||
+          (existing().isGroup == true && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'iconUrl', 'participantIds', 'updatedAt']))
+        );
+      allow delete: if isVerified() && isValidId(conversationId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 15. Conversation Members
+    match /conversationMembers/{memberId} {
+      allow get: if isSignedIn() && isValidCompositeId(memberId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isVerified() && isValidCompositeId(memberId) &&
+        isValidConversationMember(incoming()) &&
+        incoming().joinedAt == request.time &&
+        exists(/databases/$(database)/documents/conversations/$(incoming().conversationId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.participantIds;
+      allow update: if isVerified() && isValidCompositeId(memberId) &&
+        isValidConversationMember(incoming()) &&
+        incoming().conversationId == existing().conversationId &&
+        incoming().userId == existing().userId &&
+        incoming().joinedAt == existing().joinedAt &&
+        existing().userId == request.auth.uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastReadAt', 'unreadCount']);
+      allow delete: if isVerified() && isValidCompositeId(memberId) && existing().userId == request.auth.uid;
+    }
+
+    // 16. Message Reactions
+    match /messageReactions/{reactionId} {
+      allow get: if isSignedIn() && isValidCompositeId(reactionId);
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || existing().isPublicScope == true);
+      allow create: if isVerified() && isNotSuspended() && isValidCompositeId(reactionId) &&
+        isValidMessageReaction(incoming()) &&
+        incoming().id == reactionId &&
+        incoming().userId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isVerified() && isValidCompositeId(reactionId) && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    // 17. Pinned Messages
+    match /pinnedMessages/{pinId} {
+      allow get: if isSignedIn() && isValidId(pinId) && (existing().isPublicScope == true || ('serverId' in existing() && isServerMember(existing().serverId)));
+      allow list: if isSignedIn() && (existing().pinnedBy == request.auth.uid || existing().isPublicScope == true);
+      allow create: if isVerified() && isValidId(pinId) &&
+        isValidPinnedMessage(incoming()) &&
+        incoming().id == pinId &&
+        incoming().pinnedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        (!('serverId' in incoming()) || isServerStaff(incoming().serverId) || hasServerPerm(incoming().serverId, 'pinMessages') || hasServerPerm(incoming().serverId, 'manageMessages'));
+      allow update: if false;
+      allow delete: if isVerified() && isValidId(pinId) && (
+        existing().pinnedBy == request.auth.uid ||
+        ('serverId' in existing() && (isServerStaff(existing().serverId) || hasServerPerm(existing().serverId, 'pinMessages') || hasServerPerm(existing().serverId, 'manageMessages'))) ||
+        isAdmin()
+      );
+    }
+
+    // 18. Notifications
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && isValidId(notificationId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isVerified() && isValidId(notificationId) &&
+        isValidNotification(incoming()) &&
+        incoming().id == notificationId &&
+        (!('actorId' in incoming()) || incoming().actorId == request.auth.uid) &&
+        incoming().read == false &&
+        incoming().createdAt == request.time;
+      allow update: if isVerified() && isValidId(notificationId) &&
+        isValidNotification(incoming()) &&
+        existing().userId == request.auth.uid &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if isVerified() && isValidId(notificationId) && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    // 19. User Settings
+    match /userSettings/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isVerified() && isValidId(userId) && isOwner(userId) &&
+        isValidUserSettings(incoming()) &&
+        incoming().userId == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerified() && isValidId(userId) && isOwner(userId) &&
+        isValidUserSettings(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'theme', 'accentColor', 'fontSize', 'density', 'reducedMotion',
+          'highContrast', 'notifyDms', 'notifyMentions', 'notifyFriendRequests',
+          'notifyServers', 'showOnlineStatus', 'mediaAutoPreview', 'updatedAt'
+        ]);
+      allow delete: if isVerified() && isValidId(userId) && (isOwner(userId) || isAdmin());
+    }
+
+    // 20. Reports
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && (existing().reporterId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().reporterId == request.auth.uid || isPlatformOwner());
+      allow create: if isVerified() && isValidId(reportId) &&
+        isValidReport(incoming()) &&
+        incoming().id == reportId &&
+        incoming().reporterId == request.auth.uid &&
+        incoming().status == 'open' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(reportId) &&
+        isValidReport(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().reporterId == existing().reporterId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(reportId);
+    }
+
+    // 21. Moderation Actions
+    match /moderationActions/{actionId} {
+      allow get: if isSignedIn() && isValidId(actionId) && (
+        existing().targetUserId == request.auth.uid ||
+        ('serverId' in existing() && (isServerStaff(existing().serverId) || hasServerPerm(existing().serverId, 'moderateMembers'))) ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (existing().targetUserId == request.auth.uid || isPlatformOwner());
+      allow create: if isVerified() && isValidId(actionId) &&
+        isValidModerationAction(incoming()) &&
+        incoming().id == actionId &&
+        incoming().actorId == request.auth.uid &&
+        incoming().createdAt == request.time && (
+          isAdmin() ||
+          ('serverId' in incoming() && (isServerStaff(incoming().serverId) || hasServerPerm(incoming().serverId, 'moderateMembers')))
+        );
+      allow update, delete: if false;
+    }
+
+    // 22. Voice Sessions
+    match /voiceSessions/{sessionId} {
+      allow get: if isSignedIn() && isValidCompositeId(sessionId) && isServerMember(existing().serverId);
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      allow create: if isVerified() && isNotSuspended() && isValidCompositeId(sessionId) &&
+        isValidVoiceSession(incoming()) &&
+        incoming().id == sessionId &&
+        incoming().userId == request.auth.uid &&
+        incoming().joinedAt == request.time &&
+        isServerMember(incoming().serverId);
+      allow update: if isVerified() && isValidCompositeId(sessionId) &&
+        isValidVoiceSession(incoming()) &&
+        existing().userId == request.auth.uid &&
+        incoming().id == existing().id &&
+        incoming().channelId == existing().channelId &&
+        incoming().serverId == existing().serverId &&
+        incoming().userId == existing().userId &&
+        incoming().joinedAt == existing().joinedAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['muted', 'deafened', 'speaking']);
+      allow delete: if isVerified() && isValidCompositeId(sessionId) && (existing().userId == request.auth.uid || isServerStaff(existing().serverId) || isAdmin());
+    }
+
+    // 23. Audit Logs
+    match /auditLogs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && (
+        existing().actorId == request.auth.uid ||
+        ('serverId' in existing() && (isServerAdminOrOwner(existing().serverId) || hasServerPerm(existing().serverId, 'manageServer'))) ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        existing().actorId == request.auth.uid ||
+        ('serverOwnerId' in existing() && existing().serverOwnerId == request.auth.uid) ||
+        ('staffUids' in existing() && request.auth.uid in existing().staffUids) ||
+        isPlatformOwner()
+      );
+      allow create: if isVerified() && isValidId(logId) &&
+        isValidAuditLog(incoming()) &&
+        incoming().id == logId &&
+        incoming().actorId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // 24. Media Library
+    match /mediaLibrary/{mediaId} {
+      allow get: if isSignedIn() && isValidId(mediaId) && (existing().visibility == 'public' || existing().uploaderId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().uploaderId == request.auth.uid || existing().visibility == 'public');
+      allow create: if isVerified() && isNotSuspended() && isValidId(mediaId) &&
+        isValidMediaItem(incoming()) &&
+        incoming().id == mediaId &&
+        incoming().uploaderId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if isVerified() && isNotSuspended() && isValidId(mediaId) &&
+        isValidMediaItem(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().uploaderId == existing().uploaderId &&
+        incoming().createdAt == existing().createdAt &&
+        (!('updatedAt' in incoming()) || incoming().updatedAt == request.time) && (
+          isAdmin() ||
+          (existing().uploaderId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'url', 'cloudinaryPublicId', 'cloudinaryAssetId', 'category',
+            'visibility', 'isAfterDark', 'mimeType', 'sizeBytes', 'width', 'height',
+            'format', 'updatedAt'
+          ]))
+        );
+      allow delete: if isVerified() && isValidId(mediaId) && (existing().uploaderId == request.auth.uid || isAdmin());
+    }
+  }
+}

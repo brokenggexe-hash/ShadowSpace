@@ -1,0 +1,6 @@
+{
+  "name": "ShadowSpace",
+  "description": "Your Space. Your Identity. Your Community. Independent real-time social communication platform.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

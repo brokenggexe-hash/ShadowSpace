@@ -1,0 +1,552 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Public non-PII profile representation for ShadowSpace users",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "minLength": 3, "maxLength": 32, "pattern": "^[a-z0-9_\\.]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "bio": { "type": "string", "maxLength": 500 },
+        "pronouns": { "type": "string", "maxLength": 40 },
+        "location": { "type": "string", "maxLength": 80 },
+        "website": { "type": "string", "maxLength": 256 },
+        "statusMessage": { "type": "string", "maxLength": 120 },
+        "onlineStatus": { "type": "string", "enum": ["online", "idle", "dnd", "offline"] },
+        "avatarUrl": { "type": "string", "maxLength": 2048 },
+        "avatarPublicId": { "type": "string", "maxLength": 256 },
+        "bannerUrl": { "type": "string", "maxLength": 2048 },
+        "bannerPublicId": { "type": "string", "maxLength": 256 },
+        "accentColor": { "type": "string", "maxLength": 32 },
+        "profileBg": { "type": "string", "maxLength": 64 },
+        "profileVisibility": { "type": "string", "enum": ["public", "friends", "private"] },
+        "badges": { "type": "array" },
+        "discordUsername": { "type": "string", "maxLength": 64 },
+        "discordAvatar": { "type": "string", "maxLength": 2048 },
+        "lastUsernameChange": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "username", "displayName", "onlineStatus", "profileVisibility", "createdAt", "updatedAt"]
+    },
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Private PII and sensitive account preferences stored under split collection",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "ageVerified": { "type": "boolean" },
+        "afterDarkConsent": { "type": "boolean" },
+        "dmPermission": { "type": "string", "enum": ["everyone", "friends", "server_members"] },
+        "friendRequestPermission": { "type": "string", "enum": ["everyone", "mutual_servers", "none"] },
+        "discordId": { "type": "string", "maxLength": 64 },
+        "suspended": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "ageVerified", "afterDarkConsent", "suspended", "createdAt", "updatedAt"]
+    },
+    "UsernameClaim": {
+      "title": "UsernameClaim",
+      "description": "Unique lowercase username reservation",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "minLength": 3, "maxLength": 32, "pattern": "^[a-z0-9_\\.]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "username", "createdAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted server-side administrator record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 254 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "FriendRequest": {
+      "title": "FriendRequest",
+      "description": "Pending or resolved friend invitation between two users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fromUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "toUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fromUsername": { "type": "string", "maxLength": 32 },
+        "toUsername": { "type": "string", "maxLength": 32 },
+        "participants": { "type": "array" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "fromUid", "toUid", "participants", "status", "createdAt", "updatedAt"]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Active mutual friendship between two users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 260, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "users": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "users", "createdAt"]
+    },
+    "BlockedUser": {
+      "title": "BlockedUser",
+      "description": "User block record",
+      "type": "object",
+      "properties": {
+        "blockerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "blockedUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reason": { "type": "string", "maxLength": 250 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["blockerUid", "blockedUid", "createdAt"]
+    },
+    "Server": {
+      "title": "Server",
+      "description": "ShadowSpace community server",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 500 },
+        "iconUrl": { "type": "string", "maxLength": 2048 },
+        "iconPublicId": { "type": "string", "maxLength": 256 },
+        "bannerUrl": { "type": "string", "maxLength": 2048 },
+        "bannerPublicId": { "type": "string", "maxLength": 256 },
+        "accentColor": { "type": "string", "maxLength": 32 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isPublic": { "type": "boolean" },
+        "isAfterDark": { "type": "boolean" },
+        "category": { "type": "string", "maxLength": 40 },
+        "memberCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "ownerId", "isPublic", "isAfterDark", "memberCount", "createdAt", "updatedAt"]
+    },
+    "ServerMember": {
+      "title": "ServerMember",
+      "description": "Membership and RBAC role assignment within a server",
+      "type": "object",
+      "properties": {
+        "serverId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["owner", "admin", "moderator", "member"] },
+        "roleIds": { "type": "array" },
+        "permissions": { "type": "object" },
+        "isPublicServer": { "type": "boolean" },
+        "muted": { "type": "boolean" },
+        "banned": { "type": "boolean" },
+        "nickname": { "type": "string", "maxLength": 64 },
+        "inviteCode": { "type": "string", "maxLength": 32 },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["serverId", "userId", "role", "isPublicServer", "muted", "banned", "joinedAt", "updatedAt"]
+    },
+    "ServerRole": {
+      "title": "ServerRole",
+      "description": "Custom or named server role with color and granular permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "color": { "type": "string", "maxLength": 32 },
+        "position": { "type": "number" },
+        "permissions": { "type": "object" },
+        "isPublicServer": { "type": "boolean" },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "memberUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "serverId", "name", "color", "position", "permissions", "isPublicServer", "ownerId", "createdAt", "updatedAt"]
+    },
+    "ServerInvitation": {
+      "title": "ServerInvitation",
+      "description": "Invite code for joining a server",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 4, "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "creatorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "maxUses": { "type": "number" },
+        "uses": { "type": "number" },
+        "revoked": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "serverId", "creatorId", "maxUses", "uses", "revoked", "createdAt"]
+    },
+    "ChannelCategory": {
+      "title": "ChannelCategory",
+      "description": "Channel group header inside a server",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "position": { "type": "number" },
+        "isPublicServer": { "type": "boolean" },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "memberUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "serverId", "name", "position", "isPublicServer", "createdAt"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "Text, announcement, private, or voice channel inside a server",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "type": { "type": "string", "enum": ["text", "announcement", "voice", "private"] },
+        "topic": { "type": "string", "maxLength": 300 },
+        "description": { "type": "string", "maxLength": 500 },
+        "isPrivate": { "type": "boolean" },
+        "isPublic": { "type": "boolean" },
+        "isAfterDark": { "type": "boolean" },
+        "position": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "memberUids": { "type": "array" },
+        "allowedRoles": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "serverId", "name", "type", "isPrivate", "isPublic", "isAfterDark", "position", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Real-time message in a server channel or direct message conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "scopeType": { "type": "string", "enum": ["channel", "dm"] },
+        "scopeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "maxLength": 128 },
+        "isPublicChannel": { "type": "boolean" },
+        "participantIds": { "type": "array" },
+        "authorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "authorAvatar": { "type": "string", "maxLength": 2048 },
+        "content": { "type": "string", "maxLength": 4000 },
+        "text": { "type": "string", "maxLength": 4000 },
+        "attachments": { "type": "array" },
+        "attachmentMeta": { "type": "array" },
+        "replyToId": { "type": "string", "maxLength": 128 },
+        "replyPreview": { "type": "string", "maxLength": 200 },
+        "mentions": { "type": "array" },
+        "pinned": { "type": "boolean" },
+        "edited": { "type": "boolean" },
+        "editedAt": { "type": "string", "format": "date-time" },
+        "deleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "scopeType", "scopeId", "isPublicChannel", "authorId", "authorName", "content", "pinned", "edited", "deleted", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "1-on-1 or group direct message conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isGroup": { "type": "boolean" },
+        "name": { "type": "string", "maxLength": 80 },
+        "iconUrl": { "type": "string", "maxLength": 2048 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "participantIds": { "type": "array" },
+        "lastMessageText": { "type": "string", "maxLength": 200 },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "isGroup", "ownerId", "participantIds", "createdAt", "updatedAt"]
+    },
+    "ConversationMember": {
+      "title": "ConversationMember",
+      "description": "Participant read state for a direct message conversation",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "lastReadAt": { "type": "string", "format": "date-time" },
+        "unreadCount": { "type": "number" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "userId", "unreadCount", "joinedAt"]
+    },
+    "MessageReaction": {
+      "title": "MessageReaction",
+      "description": "Emoji reaction by a user on a message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "messageId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "scopeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isPublicScope": { "type": "boolean" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "emoji": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "messageId", "scopeId", "isPublicScope", "userId", "emoji", "createdAt"]
+    },
+    "PinnedMessage": {
+      "title": "PinnedMessage",
+      "description": "Pinned message reference within a channel or DM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "scopeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "messageId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "maxLength": 128 },
+        "isPublicScope": { "type": "boolean" },
+        "pinnedBy": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "contentPreview": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "scopeId", "messageId", "isPublicScope", "pinnedBy", "contentPreview", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["friend_request", "dm", "group_message", "server_invite", "mention", "reaction", "moderation"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "body": { "type": "string", "maxLength": 300 },
+        "link": { "type": "string", "maxLength": 256 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "type", "title", "body", "read", "createdAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Theme, accessibility, notification, and privacy preferences",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "theme": { "type": "string", "enum": ["dark", "light"] },
+        "accentColor": { "type": "string", "maxLength": 32 },
+        "fontSize": { "type": "string", "enum": ["sm", "md", "lg"] },
+        "density": { "type": "string", "enum": ["compact", "comfortable"] },
+        "reducedMotion": { "type": "boolean" },
+        "highContrast": { "type": "boolean" },
+        "notifyDms": { "type": "boolean" },
+        "notifyMentions": { "type": "boolean" },
+        "notifyFriendRequests": { "type": "boolean" },
+        "notifyServers": { "type": "boolean" },
+        "showOnlineStatus": { "type": "boolean" },
+        "mediaAutoPreview": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "theme", "accentColor", "fontSize", "density", "reducedMotion", "updatedAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "User, message, or community abuse report",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reporterId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "targetType": { "type": "string", "enum": ["user", "message", "server", "media"] },
+        "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "serverId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "minLength": 3, "maxLength": 500 },
+        "status": { "type": "string", "enum": ["open", "reviewing", "resolved", "dismissed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "reporterId", "targetType", "targetId", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "ModerationAction": {
+      "title": "ModerationAction",
+      "description": "Authoritative moderation action record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "maxLength": 128 },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "targetUserId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "action": { "type": "string", "enum": ["mute", "unmute", "kick", "ban", "unban", "delete_message", "suspend", "unsuspend"] },
+        "reason": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "actorId", "targetUserId", "action", "reason", "createdAt"]
+    },
+    "VoiceSession": {
+      "title": "VoiceSession",
+      "description": "Active WebRTC voice room participant state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "channelId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "maxLength": 64 },
+        "muted": { "type": "boolean" },
+        "deafened": { "type": "boolean" },
+        "speaking": { "type": "boolean" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "channelId", "serverId", "userId", "muted", "deafened", "speaking", "joinedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable server and platform audit log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serverId": { "type": "string", "maxLength": 128 },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "event": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "details": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "actorId", "event", "details", "createdAt"]
+    },
+    "MediaItem": {
+      "title": "MediaItem",
+      "description": "Uploaded or curated GIF/image media asset metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uploaderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "url": { "type": "string", "maxLength": 2048 },
+        "cloudinaryPublicId": { "type": "string", "maxLength": 256 },
+        "cloudinaryAssetId": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "enum": ["general", "anime", "reactions", "funny", "flirty", "community"] },
+        "visibility": { "type": "string", "enum": ["public", "private"] },
+        "isAfterDark": { "type": "boolean" },
+        "mimeType": { "type": "string", "maxLength": 64 },
+        "sizeBytes": { "type": "number" },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "format": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uploaderId", "title", "url", "category", "visibility", "isAfterDark", "mimeType", "sizeBytes", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "Public profile documents without PII"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Split-collection PII and account privacy data"
+    },
+    "/usernames/{username}": {
+      "schema": { "$ref": "#/entities/UsernameClaim" },
+      "description": "Unique lowercase username claim documents"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Trusted administrator identities"
+    },
+    "/friendRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/FriendRequest" },
+      "description": "Friend request workflow records"
+    },
+    "/friendships/{friendshipId}": {
+      "schema": { "$ref": "#/entities/Friendship" },
+      "description": "Mutual friendship records"
+    },
+    "/blockedUsers/{blockId}": {
+      "schema": { "$ref": "#/entities/BlockedUser" },
+      "description": "User block records"
+    },
+    "/servers/{serverId}": {
+      "schema": { "$ref": "#/entities/Server" },
+      "description": "Community servers"
+    },
+    "/serverMembers/{memberId}": {
+      "schema": { "$ref": "#/entities/ServerMember" },
+      "description": "Server membership and role assignments"
+    },
+    "/serverRoles/{roleId}": {
+      "schema": { "$ref": "#/entities/ServerRole" },
+      "description": "Custom server roles with colors and granular permissions"
+    },
+    "/serverInvitations/{inviteCode}": {
+      "schema": { "$ref": "#/entities/ServerInvitation" },
+      "description": "Server invitation codes"
+    },
+    "/channelCategories/{categoryId}": {
+      "schema": { "$ref": "#/entities/ChannelCategory" },
+      "description": "Server channel categories"
+    },
+    "/channels/{channelId}": {
+      "schema": { "$ref": "#/entities/Channel" },
+      "description": "Server text, announcement, private, and voice channels"
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Channel and direct messages"
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "1-on-1 and group DM conversations"
+    },
+    "/conversationMembers/{memberId}": {
+      "schema": { "$ref": "#/entities/ConversationMember" },
+      "description": "DM participant read/unread tracking"
+    },
+    "/messageReactions/{reactionId}": {
+      "schema": { "$ref": "#/entities/MessageReaction" },
+      "description": "Emoji reactions on messages"
+    },
+    "/pinnedMessages/{pinId}": {
+      "schema": { "$ref": "#/entities/PinnedMessage" },
+      "description": "Pinned messages per channel or conversation"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Per-user notifications"
+    },
+    "/userSettings/{userId}": {
+      "schema": { "$ref": "#/entities/UserSettings" },
+      "description": "User appearance, notification, and accessibility settings"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/Report" },
+      "description": "Abuse and moderation reports"
+    },
+    "/moderationActions/{actionId}": {
+      "schema": { "$ref": "#/entities/ModerationAction" },
+      "description": "Server and platform moderation actions"
+    },
+    "/voiceSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/VoiceSession" },
+      "description": "Active WebRTC voice session participant records"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable server and platform audit logs"
+    },
+    "/mediaLibrary/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaItem" },
+      "description": "Categorized media and GIF assets"
+    }
+  }
+}
